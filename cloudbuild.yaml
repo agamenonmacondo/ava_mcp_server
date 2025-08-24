@@ -1,0 +1,21 @@
+steps:
+  # Paso 1: Construir la imagen de Docker
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/[PROJECT_ID]/ava-bot', '.']
+
+  # Paso 2: Subir la imagen a Google Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/[PROJECT_ID]/ava-bot']
+
+  # Paso 3: Desplegar en Google Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: [
+      'run', 'deploy', 'ava-bot',
+      '--image', 'gcr.io/[PROJECT_ID]/ava-bot',
+      '--platform', 'managed',
+      '--region', '[REGION]',
+      '--allow-unauthenticated'
+    ]
+
+images:
+  - 'gcr.io/[PROJECT_ID]/ava-bot'
