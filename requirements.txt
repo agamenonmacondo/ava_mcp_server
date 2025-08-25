@@ -58,3 +58,11 @@ aiohttp==3.8.6
 PyPDF2==3.0.1
 python-docx==0.8.11
 openpyxl==3.1.2
+
+# Esquemas JSON y validación
+jsonschema==4.19.1
+pydantic==2.4.2
+
+# Dependencias adicionales para vision_adapter
+pathlib2==2.3.7
+typing-extensions==4.8.0
