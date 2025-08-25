@@ -7,14 +7,15 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/[PROJECT_ID]/ava-bot']
 
-  # Paso 3: Desplegar en Google Cloud Run
+  # Paso 3: Desplegar en Google Cloud Run con puerto específico
   - name: 'gcr.io/cloud-builders/gcloud'
     args: [
       'run', 'deploy', 'ava-bot',
       '--image', 'gcr.io/[PROJECT_ID]/ava-bot',
       '--platform', 'managed',
       '--region', '[REGION]',
-      '--allow-unauthenticated'
+      '--allow-unauthenticated',
+      '--port', '50051'
     ]
 
 images:
