@@ -822,11 +822,15 @@ if GRPC_AVAILABLE:
                 context.set_details(str(e))
                 return ava_bot_pb2.ToolResponse()
 
-def start_grpc_server(host='localhost', port=50051):
-    """Iniciar servidor gRPC"""
+def start_grpc_server(host='0.0.0.0', port=None):
+    """Iniciar servidor gRPC con soporte para Cloud Run"""
     if not GRPC_AVAILABLE:
         raise ImportError("gRPC requerido: pip install grpcio grpcio-tools")
-        
+    
+    # Leer puerto desde variable de entorno PORT (Cloud Run) o usar 8080 por defecto
+    if port is None:
+        port = int(os.environ.get("PORT", 8080))
+    
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     mcp_server = CleanMCPServer()
     mcp_server.initialize()
@@ -836,6 +840,10 @@ def start_grpc_server(host='localhost', port=50051):
         
     server.add_insecure_port(f'{host}:{port}')
     safe_log(f"🚀 Iniciando servidor gRPC en {host}:{port}")
+    
+    # Mensaje de confirmación para Cloud Run
+    print(f"Hello from Cloud Run! The container started successfully and is listening for HTTP requests on port {port}")
+    
     server.start()
     
     try:
@@ -847,7 +855,7 @@ def start_grpc_server(host='localhost', port=50051):
         sys.exit(1)
 
 def main():
-    """Función principal - gRPC por defecto"""
+    """Función principal - gRPC por defecto con soporte para Cloud Run"""
     if len(sys.argv) > 1 and sys.argv[1] == "info":
         # Modo información (sin cambios)
         safe_log("🧪 Mostrando información del servidor...")
@@ -879,15 +887,24 @@ def main():
         print("="*60)
         
     else:
-        # Modo servidor gRPC por defecto
-        host = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != "grpc" else 'localhost'
-        port = int(sys.argv[2]) if len(sys.argv) > 2 else 50051
+        # Modo servidor gRPC con configuración automática de puerto
+        # Usar host '0.0.0.0' para Cloud Run (escuchar en todas las interfaces)
+        host = '0.0.0.0'
         
-        if len(sys.argv) > 1 and sys.argv[1] == "grpc":
-            host = sys.argv[2] if len(sys.argv) > 2 else 'localhost'
-            port = int(sys.argv[3]) if len(sys.argv) > 3 else 50051
+        # El puerto se lee automáticamente de la variable de entorno PORT
+        port = int(os.environ.get("PORT", 8080))
+        
+        # Si se pasan argumentos específicos, usarlos (para desarrollo local)
+        if len(sys.argv) > 1 and sys.argv[1] not in ["grpc", "info"]:
+            host = sys.argv[1]
+            port = int(sys.argv[2]) if len(sys.argv) > 2 else port
+        elif len(sys.argv) > 1 and sys.argv[1] == "grpc":
+            host = sys.argv[2] if len(sys.argv) > 2 else host
+            port = int(sys.argv[3]) if len(sys.argv) > 3 else port
         
         safe_log(f"🌐 Iniciando servidor gRPC en {host}:{port}")
+        safe_log(f"🔧 Puerto configurado desde: {'variable PORT' if 'PORT' in os.environ else 'valor por defecto'}")
+        
         start_grpc_server(host=host, port=port)
 
 if __name__ == "__main__":
