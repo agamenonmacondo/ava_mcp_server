@@ -51,7 +51,7 @@ pyttsx3==2.90
 # Utilidades
 python-dotenv==1.0.0
 requests==2.31.0
-urllib3==2.0.7
+urllib3==1.26.16
 aiohttp==3.8.6
 
 # Procesamiento de archivos
@@ -66,3 +66,4 @@ pydantic==2.4.2
 # Dependencias adicionales para vision_adapter
 pathlib2==2.3.7
 typing-extensions==4.8.0
+
