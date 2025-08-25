@@ -13,8 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar todo el código fuente al contenedor
 COPY . .
 
-# Exponer el puerto gRPC
-EXPOSE 50051
+# Exponer el puerto estándar de Cloud Run
+EXPOSE 8080
 
 # Comando para ejecutar el servidor MCP
 CMD ["python", "mcp_server/run_server.py"]
