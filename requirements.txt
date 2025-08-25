@@ -32,9 +32,9 @@ google-api-python-client==2.103.0
 google-api-core==2.11.1
 googleapis-common-protos==1.60.0
 
-# APIs externas
-openai==1.3.5
-groq==0.4.1
+# APIs externas (VERSIONES CORREGIDAS)
+openai==1.3.9
+groq==0.4.2
 
 # Automatización web
 playwright==1.40.0
@@ -43,11 +43,12 @@ playwright==1.40.0
 Pillow==10.0.1
 opencv-python==4.8.1.78
 
-# Audio processing (para corregir errores de pygame)
+# Audio processing (CORREGIDO)
 pygame==2.5.2
 pydub==0.25.1
 gTTS==2.4.0
 pyttsx3==2.90
+ffmpeg-python==0.2.0
 
 # Utilidades
 python-dotenv==1.0.0
