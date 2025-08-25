@@ -1,47 +1,45 @@
 FROM python:3.11-slim
 
-# Instalar dependencias del sistema incluyendo ffmpeg
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Establecer directorio de trabajo
 WORKDIR /app
 
-# Copiar requirements.txt primero para optimizar cache
+# Copiar requirements e instalar dependencias
 COPY requirements.txt .
-
-# Instalar dependencias de Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el resto del código
+# Copiar todo el código fuente
 COPY . .
 
-# Verificar estructura copiada
-RUN echo "=== ESTRUCTURA COPIADA ===" && \
-    find /app -name "*.py" | grep -E "(server|run)" | head -10 && \
-    echo "=== DIRECTORIO ava_bot ===" && \
-    ls -la /app/ava_bot/ || echo "ava_bot no existe" && \
-    echo "=== BUSCANDO ARCHIVOS SERVIDOR ===" && \
-    find /app -name "*server*.py" -type f
+# ✅ DEBUG: Verificar estructura real copiada
+RUN echo "=== ESTRUCTURA REAL ===" && \
+    ls -la /app/ && \
+    echo "=== CONTENIDO mcp_server ===" && \
+    ls -la /app/mcp_server/ 2>/dev/null || echo "mcp_server no existe" && \
+    echo "=== BUSCANDO run_server.py ===" && \
+    find /app -name "run_server.py" -type f
 
-# Exponer puerto
+# Exponer puerto para Cloud Run
 EXPOSE 8080
 
-# Comando flexible que busca el archivo correcto
-CMD echo "Iniciando servidor..." && \
-    if [ -f "/app/ava_bot/mcp_server/run_server.py" ]; then \
-        echo "Usando ruta estándar" && python /app/ava_bot/mcp_server/run_server.py; \
-    elif [ -f "/app/run_server.py" ]; then \
-        echo "Usando ruta raíz" && python /app/run_server.py; \
+# ✅ COMANDO CORREGIDO para estructura: carpeta_principal/mcp_server/run_server.py
+CMD echo "=== INICIANDO AVA BOT SERVER ===" && \
+    echo "Puerto: ${PORT:-8080}" && \
+    echo "Directorio actual: $(pwd)" && \
+    echo "Contenido /app:" && ls -la /app/ && \
+    echo "=== EJECUTANDO SERVIDOR ===" && \
+    if [ -f "/app/mcp_server/run_server.py" ]; then \
+        echo "✅ Ejecutando desde /app/mcp_server/run_server.py" && \
+        cd /app && python mcp_server/run_server.py; \
     else \
-        echo "Buscando archivo servidor..." && \
-        SERVER_FILE=$(find /app -name "*server*.py" -type f | head -1) && \
-        if [ -n "$SERVER_FILE" ]; then \
-            echo "Ejecutando: $SERVER_FILE" && python "$SERVER_FILE"; \
-        else \
-            echo "ERROR: No se encontró archivo servidor" && exit 1; \
-        fi; \
+        echo "❌ /app/mcp_server/run_server.py no encontrado" && \
+        echo "Archivos disponibles:" && \
+        find /app -name "*.py" | head -10 && \
+        exit 1; \
     fi
