@@ -1,22 +1,26 @@
 steps:
   # Paso 1: Construir la imagen de Docker
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/[PROJECT_ID]/ava-bot', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/ava-mcp-server', '.']
 
   # Paso 2: Subir la imagen a Google Container Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/[PROJECT_ID]/ava-bot']
+    args: ['push', 'gcr.io/$PROJECT_ID/ava-mcp-server']
 
-  # Paso 3: Desplegar en Google Cloud Run con puerto específico
+  # Paso 3: Desplegar en Google Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     args: [
-      'run', 'deploy', 'ava-bot',
-      '--image', 'gcr.io/[PROJECT_ID]/ava-bot',
+      'run', 'deploy', 'ava-mcp-server',
+      '--image', 'gcr.io/$PROJECT_ID/ava-mcp-server',
       '--platform', 'managed',
-      '--region', '[REGION]',
+      '--region', 'europe-west1',
       '--allow-unauthenticated',
-      '--port', '50051'
+      '--timeout', '300',
+      '--memory', '1Gi',
+      '--cpu', '1',
+      '--max-instances', '10',
+      '--min-instances', '0'
     ]
 
 images:
-  - 'gcr.io/[PROJECT_ID]/ava-bot'
+  - 'gcr.io/$PROJECT_ID/ava-mcp-server'
