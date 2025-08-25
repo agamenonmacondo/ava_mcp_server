@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ImageAdapter:
     def __init__(self):
         """Inicializar adaptador de imágenes con Together API"""
-        self.description = "Ava Bot Image Generator - Together API FLUX.1"
+        self.description = "Ava Bot Image Generator - Together API FLUX.1 - Direct Send"
         
         # ✅ CONFIGURACIÓN TOGETHER API
         load_dotenv(dotenv_path="C:/Users/h/Downloads/pagina ava/mod-pagina/.env", override=True)
@@ -24,13 +24,17 @@ class ImageAdapter:
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.has_real_generator = bool(self.together_api_key)
         
+        # ❌ REMOVIDO: Ya no necesitamos directorio de salida
+        # self.output_dir = os.path.join(current_dir, "..", "..", "generated_images")
+        # os.makedirs(self.output_dir, exist_ok=True)
+        
         if self.has_real_generator:
-            logger.info("✅ Together API FLUX.1 configurado correctamente")
+            logger.info("✅ Together API FLUX.1 configurado correctamente - Modo envío directo")
         else:
             logger.warning("⚠️ TOGETHER_API_KEY no encontrada - usando modo simulación")
     
     def execute(self, arguments: dict) -> dict:
-        """Ejecutar generación de imagen REAL con Together API - SIN GUARDAR"""
+        """Ejecutar generación de imagen REAL con Together API - ENVÍO DIRECTO"""
         try:
             prompt = arguments.get('prompt', 'beautiful landscape')
             style = arguments.get('style', 'photorealistic')
@@ -43,7 +47,7 @@ class ImageAdapter:
             result = self._generate_with_together_flux(prompt, style)
             
             if result.get('success'):
-                # ✅ RETORNAR IMAGEN DIRECTAMENTE EN BASE64
+                # ✅ RETORNAR IMAGEN DIRECTAMENTE PARA ENVÍO
                 return {
                     "content": [{
                         "type": "text",
@@ -54,7 +58,7 @@ class ImageAdapter:
                                f"⚡ **Generada en:** {result.get('generation_time', 'N/A')} segundos\n"
                                f"📊 **Tamaño:** {len(result.get('image_data', b'')):,} bytes\n\n"
                                f"🌐 **Imagen lista para envío directo**\n"
-                               f"🔗 **Data URL:** data:image/png;base64,{result.get('image_base64', '')[:50]}..."
+                               f"🔗 **Data URL disponible para uso inmediato**"
                     }],
                     # ✅ DATOS DE LA IMAGEN PARA USO PROGRAMÁTICO
                     "image_data": {
@@ -64,7 +68,8 @@ class ImageAdapter:
                         "size": len(result.get('image_data', b'')),
                         "prompt": prompt,
                         "style": style,
-                        "model": "FLUX.1-schnell-Free"
+                        "model": "FLUX.1-schnell-Free",
+                        "generation_time": result.get('generation_time')
                     }
                 }
             else:
@@ -111,7 +116,7 @@ class ImageAdapter:
                 "width": 1024,
                 "height": 768,
                 "steps": 4,  # FLUX schnell es rápido con pocos steps
-                "response_format": "b64_json"
+                "response_format": "b64_json"  # ✅ SOLICITAR BASE64
             }
             
             logger.info("📡 Enviando solicitud a Together API...")
@@ -126,7 +131,7 @@ class ImageAdapter:
             data = response.json()
             
             if data.get("data") and data["data"][0].get("b64_json"):
-                # ✅ OBTENER IMAGEN DIRECTAMENTE SIN GUARDAR
+                # ✅ OBTENER IMAGEN DIRECTAMENTE EN BASE64 - SIN GUARDAR
                 image_base64 = data["data"][0]["b64_json"]
                 image_data = base64.b64decode(image_base64)
                 
@@ -136,8 +141,8 @@ class ImageAdapter:
                 
                 return {
                     'success': True,
-                    'image_base64': image_base64,
-                    'image_data': image_data,
+                    'image_base64': image_base64,  # ✅ Base64 string para envío
+                    'image_data': image_data,      # ✅ Bytes para procesamiento
                     'prompt_used': enhanced_prompt,
                     'generation_time': round(generation_time, 2),
                     'model': 'FLUX.1-schnell-Free'
@@ -191,6 +196,8 @@ class ImageAdapter:
         
         return enhanced[:500]  # Limitar longitud
     
+    # ❌ REMOVIDO: _save_image() ya no es necesario
+    
     def _fallback_message(self, prompt: str, style: str) -> dict:
         """Mensaje de fallback cuando no hay API configurada"""
         return {
@@ -217,15 +224,22 @@ class ImageAdapter:
         if isinstance(result, dict) and "content" in result:
             return result["content"][0]["text"]
         return str(result)
-
+    
     def get_image_data_url(self, arguments: dict) -> str:
         """Método auxiliar para obtener solo la data URL de la imagen"""
         result = self.execute(arguments)
         if isinstance(result, dict) and "image_data" in result:
             return result["image_data"].get("data_url", "")
         return ""
+    
+    def get_image_base64(self, arguments: dict) -> str:
+        """Método auxiliar para obtener solo el base64 de la imagen"""
+        result = self.execute(arguments)
+        if isinstance(result, dict) and "image_data" in result:
+            return result["image_data"].get("base64", "")
+        return ""
 
-# ✅ FUNCIÓN DE PRUEBA INDEPENDIENTE
+# ✅ FUNCIÓN DE PRUEBA INDEPENDIENTE - ACTUALIZADA
 def test_together_api():
     """Función para probar Together API directamente - SIN GUARDAR"""
     import os
@@ -245,7 +259,7 @@ def test_together_api():
         "style": "photorealistic"
     }
     
-    print("🧪 Probando generación de imagen (sin guardar)...")
+    print("🧪 Probando generación de imagen (envío directo)...")
     result = adapter.execute(test_args)
     
     if "image_data" in result:
@@ -253,6 +267,13 @@ def test_together_api():
         print(f"   📊 Tamaño: {result['image_data']['size']:,} bytes")
         print(f"   🔗 Data URL: {result['image_data']['data_url'][:100]}...")
         print(f"   🎨 Prompt: {result['image_data']['prompt']}")
+        print(f"   ⚡ Tiempo: {result['image_data']['generation_time']} segundos")
+        
+        # ✅ MOSTRAR COMO USAR LOS DATOS
+        print(f"\n🔧 Datos disponibles para envío:")
+        print(f"   • Base64: result['image_data']['base64']")
+        print(f"   • Data URL: result['image_data']['data_url']")
+        print(f"   • Bytes: result['image_data']['bytes']")
     else:
         print(f"📄 Resultado: {result}")
     
