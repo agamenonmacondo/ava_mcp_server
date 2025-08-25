@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 import io
 from PIL import Image, ImageDraw, ImageFont
+from dotenv import load_dotenv
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -18,14 +19,10 @@ class ImageAdapter:
         self.description = "Ava Bot Image Generator - Together API FLUX.1"
         
         # ✅ CONFIGURACIÓN TOGETHER API
+        load_dotenv(dotenv_path="C:/Users/h/Downloads/pagina ava/mod-pagina/.env", override=True)
         self.together_api_key = os.getenv("TOGETHER_API_KEY")
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.has_real_generator = bool(self.together_api_key)
-        
-        # Configurar directorio de salida
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        self.output_dir = os.path.join(current_dir, "..", "..", "generated_images")
-        os.makedirs(self.output_dir, exist_ok=True)
         
         if self.has_real_generator:
             logger.info("✅ Together API FLUX.1 configurado correctamente")
@@ -33,7 +30,7 @@ class ImageAdapter:
             logger.warning("⚠️ TOGETHER_API_KEY no encontrada - usando modo simulación")
     
     def execute(self, arguments: dict) -> dict:
-        """Ejecutar generación de imagen REAL con Together API"""
+        """Ejecutar generación de imagen REAL con Together API - SIN GUARDAR"""
         try:
             prompt = arguments.get('prompt', 'beautiful landscape')
             style = arguments.get('style', 'photorealistic')
@@ -46,17 +43,29 @@ class ImageAdapter:
             result = self._generate_with_together_flux(prompt, style)
             
             if result.get('success'):
+                # ✅ RETORNAR IMAGEN DIRECTAMENTE EN BASE64
                 return {
                     "content": [{
                         "type": "text",
                         "text": f"🎨 **¡Imagen generada exitosamente con IA!**\n\n"
                                f"📝 **Descripción:** {prompt}\n"
                                f"🎭 **Estilo:** {style}\n"
-                               f"📁 **Guardada en:** {result['filepath']}\n"
                                f"🤖 **Modelo:** FLUX.1-schnell-Free\n"
-                               f"⚡ **Generada en:** {result.get('generation_time', 'N/A')} segundos\n\n"
-                               f"✨ **¡Tu imagen está lista para usar!**"
-                    }]
+                               f"⚡ **Generada en:** {result.get('generation_time', 'N/A')} segundos\n"
+                               f"📊 **Tamaño:** {len(result.get('image_data', b'')):,} bytes\n\n"
+                               f"🌐 **Imagen lista para envío directo**\n"
+                               f"🔗 **Data URL:** data:image/png;base64,{result.get('image_base64', '')[:50]}..."
+                    }],
+                    # ✅ DATOS DE LA IMAGEN PARA USO PROGRAMÁTICO
+                    "image_data": {
+                        "base64": result.get('image_base64'),
+                        "data_url": f"data:image/png;base64,{result.get('image_base64')}",
+                        "bytes": result.get('image_data'),
+                        "size": len(result.get('image_data', b'')),
+                        "prompt": prompt,
+                        "style": style,
+                        "model": "FLUX.1-schnell-Free"
+                    }
                 }
             else:
                 return {
@@ -82,7 +91,7 @@ class ImageAdapter:
             }
     
     def _generate_with_together_flux(self, prompt: str, style: str) -> dict:
-        """Generar imagen real con Together API FLUX.1"""
+        """Generar imagen real con Together API FLUX.1 - SIN GUARDAR"""
         start_time = datetime.now()
         
         try:
@@ -117,15 +126,18 @@ class ImageAdapter:
             data = response.json()
             
             if data.get("data") and data["data"][0].get("b64_json"):
-                # ✅ DECODIFICAR Y GUARDAR IMAGEN
-                image_data = base64.b64decode(data["data"][0]["b64_json"])
-                filepath = self._save_image(image_data, enhanced_prompt)
+                # ✅ OBTENER IMAGEN DIRECTAMENTE SIN GUARDAR
+                image_base64 = data["data"][0]["b64_json"]
+                image_data = base64.b64decode(image_base64)
                 
                 generation_time = (datetime.now() - start_time).total_seconds()
                 
+                logger.info(f"✅ Imagen generada en memoria: {len(image_data):,} bytes")
+                
                 return {
                     'success': True,
-                    'filepath': filepath,
+                    'image_base64': image_base64,
+                    'image_data': image_data,
                     'prompt_used': enhanced_prompt,
                     'generation_time': round(generation_time, 2),
                     'model': 'FLUX.1-schnell-Free'
@@ -179,43 +191,6 @@ class ImageAdapter:
         
         return enhanced[:500]  # Limitar longitud
     
-    def _save_image(self, image_data: bytes, prompt: str) -> str:
-        """Guardar imagen y metadatos"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # ✅ GUARDAR IMAGEN
-            img_filename = f"ava_generated_{timestamp}.png"
-            img_path = os.path.join(self.output_dir, img_filename)
-            
-            with open(img_path, 'wb') as f:
-                f.write(image_data)
-            
-            # ✅ GUARDAR METADATOS
-            meta_data = {
-                "prompt": prompt,
-                "generated_at": datetime.now().isoformat(),
-                "model": "FLUX.1-schnell-Free",
-                "api": "Together AI",
-                "filename": img_filename,
-                "size": len(image_data)
-            }
-            
-            meta_filename = f"ava_generated_{timestamp}_meta.json"
-            meta_path = os.path.join(self.output_dir, meta_filename)
-            
-            with open(meta_path, 'w', encoding='utf-8') as f:
-                json.dump(meta_data, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"✅ Imagen guardada: {img_path}")
-            logger.info(f"✅ Metadatos guardados: {meta_path}")
-            
-            return img_path
-            
-        except Exception as e:
-            logger.error(f"Error guardando imagen: {e}")
-            return f"Error guardando archivo: {str(e)}"
-    
     def _fallback_message(self, prompt: str, style: str) -> dict:
         """Mensaje de fallback cuando no hay API configurada"""
         return {
@@ -243,9 +218,16 @@ class ImageAdapter:
             return result["content"][0]["text"]
         return str(result)
 
+    def get_image_data_url(self, arguments: dict) -> str:
+        """Método auxiliar para obtener solo la data URL de la imagen"""
+        result = self.execute(arguments)
+        if isinstance(result, dict) and "image_data" in result:
+            return result["image_data"].get("data_url", "")
+        return ""
+
 # ✅ FUNCIÓN DE PRUEBA INDEPENDIENTE
 def test_together_api():
-    """Función para probar Together API directamente"""
+    """Función para probar Together API directamente - SIN GUARDAR"""
     import os
     from dotenv import load_dotenv
     
@@ -263,9 +245,16 @@ def test_together_api():
         "style": "photorealistic"
     }
     
-    print("🧪 Probando generación de imagen...")
+    print("🧪 Probando generación de imagen (sin guardar)...")
     result = adapter.execute(test_args)
-    print(f"📄 Resultado: {result}")
+    
+    if "image_data" in result:
+        print(f"✅ Imagen generada en memoria:")
+        print(f"   📊 Tamaño: {result['image_data']['size']:,} bytes")
+        print(f"   🔗 Data URL: {result['image_data']['data_url'][:100]}...")
+        print(f"   🎨 Prompt: {result['image_data']['prompt']}")
+    else:
+        print(f"📄 Resultado: {result}")
     
     return True
 
