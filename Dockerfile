@@ -22,5 +22,5 @@ COPY . .
 # Exponer puerto
 EXPOSE 8080
 
-# Comando para ejecutar el servidor
-CMD ["python", "ava_bot/mcp_server/run_server.py"]
+# ✅ COMANDO CORREGIDO - Buscar el archivo correcto
+CMD ["python", "-m", "ava_bot.mcp_server.run_server"]
