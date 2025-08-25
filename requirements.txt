@@ -13,7 +13,7 @@ SQLAlchemy==2.0.23
 
 # Base de datos vectoriales y embeddings
 qdrant-client==1.7.0
-chromadb==0.4.18
+chromadb==0.4.22
 sentence-transformers==2.2.2
 
 # Autenticación y seguridad
@@ -43,7 +43,8 @@ playwright==1.40.0
 Pillow==10.0.1
 opencv-python==4.8.1.78
 
-# Audio processing
+# Audio processing (para corregir errores de pygame)
+pygame==2.5.2
 pydub==0.25.1
 gTTS==2.4.0
 pyttsx3==2.90
