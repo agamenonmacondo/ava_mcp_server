@@ -1,484 +1,252 @@
-"""
-Adaptador TTS usando OpenAI TTS con soporte para instructions y streaming (API oficial)
-"""
-
-import sys
-from pathlib import Path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from tools.base_tool import BaseTool
 import os
-import base64
+import sys
 import logging
 import tempfile
-import time
-from openai import OpenAI
-import pygame
-from typing import Optional, Dict, Any
+from typing import Dict, Any, Optional
+from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
-load_dotenv()
+# Setup logging
+logger = logging.getLogger(__name__)
 
-class OpenAITTSAdapter(BaseTool):
-    """Adaptador TTS usando OpenAI TTS con soporte para gpt-4o-mini-tts, instructions y streaming"""
-    
-    name = "openai_tts_adapter"
-    description = "OpenAI TTS - Síntesis de voz avanzada con 11 voces, acentos colombianos/mexicanos/argentinos, streaming y modelo gpt-4o-mini-tts con instructions"
-    
-    schema = {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["text_to_speech", "get_voices"],
-                "description": "Acción a realizar"
-            },
-            "text": {
-                "type": "string", 
-                "description": "Texto para convertir a voz"
-            },
-            "voice": {
-                "type": "string",
-                "enum": ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"],
-                "default": "coral",
-                "description": "Voz de OpenAI a usar (11 voces disponibles)"
-            },
-            "model": {
-                "type": "string",
-                "default": "gpt-4o-mini-tts",
-                "enum": ["gpt-4o-mini-tts"],
-                "description": "Modelo TTS de OpenAI (solo gpt-4o-mini-tts)"
-            },
-            "speed": {
-                "type": "number",
-                "minimum": 0.25,
-                "maximum": 4.0,
-                "default": 1.0,
-                "description": "Velocidad de reproducción (0.25 a 4.0)"
-            },
-            "response_format": {
-                "type": "string",
-                "enum": ["mp3", "opus", "aac", "flac"],
-                "default": "mp3",
-                "description": "Formato de audio de salida"
-            },
-            "return_audio": {
-                "type": "boolean",
-                "default": False,
-                "description": "Retornar audio en base64"
-            },
-            "play_audio": {
-                "type": "boolean",
-                "default": True,
-                "description": "Reproducir audio inmediatamente"
-            },
-            "instructions": {
-                "type": "string",
-                "default": "",
-                "description": "Instrucciones específicas para el habla (acento, tono, emoción, etc.)"
-            },
-            "preset_accent": {
-                "type": "string",
-                "enum": ["colombiano", "mexicano", "argentino", "español", "neutral", "custom"],
-                "default": "neutral",
-                "description": "Acento preconfigurado o custom para usar instructions personalizadas"
-            }
-        },
-        "required": ["action", "text"]
-    }
-    
-    def __init__(self, openai_api_key=None):
-        """Inicializar adaptador OpenAI TTS"""
-        # ✅ FIXED: Initialize logger properly
-        self.logger = logging.getLogger(__name__)
+# Intentar importar dependencias de audio
+try:
+    import pygame
+    pygame.mixer.init()
+    PYGAME_AVAILABLE = True
+except ImportError:
+    PYGAME_AVAILABLE = False
+    logger.warning("⚠️ pygame no disponible para reproducción de audio")
+
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    logger.warning("⚠️ openai no disponible")
+
+class OpenAITTSAdapter:
+    def __init__(self):
+        """Inicializar adaptador de TTS con OpenAI - CORREGIDO"""
+        self.description = "OpenAI Text to Speech Adapter - TTS-1"
         
-        api_key = openai_api_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_KEY")
-        if not api_key:
-            self.logger.error("No OpenAI API key found")
-            raise ValueError("OpenAI API key is required")
+        # Cargar variables de entorno
+        load_dotenv(dotenv_path="C:/Users/h/Downloads/pagina ava/mod-pagina/.env", override=True)
+        
+        # Configurar directorio de salida
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        self.output_dir = os.path.join(current_dir, "..", "..", "generated_audio")
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        try:
+            if not OPENAI_AVAILABLE:
+                self.has_client = False
+                logger.error("❌ OpenAI library no disponible")
+                return
+                
+            api_key = os.getenv("OPENAI_API_KEY")
             
-        self.client = OpenAI(api_key=api_key)
-        
-        # Inicializar pygame para reproducción
-        try:
-            pygame.mixer.init()
-            self.logger.info("✅ pygame mixer inicializado")
+            if api_key:
+                # ✅ CORREGIDO: Remover argumento 'proxies'
+                self.client = OpenAI(api_key=api_key)
+                self.has_client = True
+                self.model_name = "tts-1"
+                logger.info("✅ OpenAI TTS client inicializado correctamente")
+            else:
+                self.has_client = False
+                logger.warning("⚠️ OPENAI_API_KEY no encontrada")
+                
         except Exception as e:
-            self.logger.warning(f"⚠️ pygame no disponible: {e}")
+            self.has_client = False
+            logger.error(f"❌ Error inicializando OpenAI client: {e}")
     
-    def process(self, params):
-        """Procesar operaciones TTS con OpenAI"""
-        action = params.get("action")
-        
-        if action == "text_to_speech":
-            return self._openai_text_to_speech(params)
-        elif action == "get_voices":
-            return self._get_openai_voices()
-        else:
-            return {
-                "success": False,
-                "error": f"Acción no reconocida: {action}"
-            }
-    
-    def _get_instructions(self, preset_accent, custom_instructions=""):
-        """Generar instructions basadas en acento preconfigurado o personalizado"""
-        
-        preset_instructions = {
-            "colombiano": "Habla con acento colombiano amigable y cálido, con entonación melodiosa característica de Colombia. Usa un tono alegre y pausado.",
-            "mexicano": "Habla con acento mexicano neutro, con entonación clara y ritmo pausado típico del español mexicano.",
-            "argentino": "Habla con acento argentino rioplatense, con entonación característica y ritmo dinámico del español argentino.",
-            "español": "Habla con acento español peninsular neutro, con pronunciación clara y entonación característica de España.",
-            "neutral": "Speak in a natural and clear tone."
-        }
-        
-        if preset_accent == "custom":
-            return custom_instructions
-        else:
-            return preset_instructions.get(preset_accent, "Speak in a natural and clear tone.")
-    
-    def _openai_text_to_speech(self, params):
-        """Convertir texto a voz usando OpenAI TTS con streaming e instructions (API oficial)"""
+    def execute(self, arguments: dict) -> dict:
+        """Ejecutar síntesis de voz"""
         try:
-            text = params.get("text", "")
-            voice = params.get("voice", "coral")
-            model = params.get("model", "gpt-4o-mini-tts")
-            speed = params.get("speed", 1.0)
-            response_format = params.get("response_format", "mp3")
-            return_audio = params.get("return_audio", False)
-            play_audio = params.get("play_audio", True)
-            preset_accent = params.get("preset_accent", "neutral")
-            custom_instructions = params.get("instructions", "")
+            if not self.has_client:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": "❌ **OpenAI TTS no disponible**\n\n"
+                               "🔧 **Posibles causas:**\n"
+                               "• OPENAI_API_KEY no configurada\n"
+                               "• Error de inicialización del cliente\n"
+                               "• Dependencias faltantes\n\n"
+                               "💡 **Solución:** Configura tu OPENAI_API_KEY en las variables de entorno"
+                    }]
+                }
+            
+            text = arguments.get('text', '')
+            voice = arguments.get('voice', 'alloy')  # alloy, echo, fable, onyx, nova, shimmer
+            model = arguments.get('model', 'tts-1')  # tts-1 o tts-1-hd
+            play_audio = arguments.get('play', False)
             
             if not text:
                 return {
-                    "success": False,
-                    "error": "Texto requerido",
-                    "message": "❌ No se proporcionó texto para convertir"
+                    "content": [{
+                        "type": "text",
+                        "text": "❌ **Error:** Se requiere el texto a sintetizar (text)"
+                    }]
                 }
             
-            # Generar instructions finales
-            final_instructions = self._get_instructions(preset_accent, custom_instructions)
-            
-            print(f"🎙️ Generando voz con OpenAI TTS...")
-            print(f"📝 Texto: {text[:50]}{'...' if len(text) > 50 else ''}")
-            print(f"🗣️ Voz: {voice}")
-            print(f"🤖 Modelo: {model}")
-            print(f"🌍 Acento: {preset_accent}")
-            
-            # Crear archivo temporal
-            temp_file = tempfile.NamedTemporaryFile(
-                delete=False, 
-                suffix=f".{response_format}"
-            )
-            temp_file.close()
-            speech_file_path = Path(temp_file.name)
-            
-            try:
-                # ✅ Try streaming first, fallback to regular if not available
-                try:
-                    with self.client.audio.speech.with_streaming_response.create(
-                        model=model,
-                        voice=voice,
-                        input=text,
-                        instructions=final_instructions,
-                        speed=speed,
-                        response_format=response_format
-                    ) as response:
-                        response.stream_to_file(speech_file_path)
-                    
-                    print("✅ Audio generado con streaming")
-                    
-                except AttributeError:
-                    # Fallback to regular TTS without streaming/instructions
-                    print("⚠️ Streaming no disponible, usando TTS estándar...")
-                    response = self.client.audio.speech.create(
-                        model="tts-1",  # Fallback model
-                        voice=voice,
-                        input=text,
-                        speed=speed,
-                        response_format=response_format
-                    )
-                    
-                    with open(speech_file_path, 'wb') as f:
-                        f.write(response.content)
-                    
-                    print("✅ Audio generado (modo estándar)")
-                
-            except Exception as model_error:
-                self.logger.error(f"Error con modelo {model}: {model_error}")
+            if len(text) > 4096:
                 return {
-                    "success": False,
-                    "error": str(model_error),
-                    "message": f"❌ Error OpenAI TTS: {str(model_error)}"
+                    "content": [{
+                        "type": "text",
+                        "text": f"❌ **Error:** El texto es demasiado largo ({len(text)} caracteres). Máximo: 4096 caracteres"
+                    }]
                 }
             
-            audio_base64 = None
+            # Generar audio
+            result = self._generate_speech(text, voice, model)
             
-            # Reproducir audio si se solicita
-            if play_audio:
-                try:
-                    print("🔊 Reproduciendo audio...")
-                    pygame.mixer.music.load(str(speech_file_path))
-                    pygame.mixer.music.play()
-                    
-                    while pygame.mixer.music.get_busy():
-                        pygame.time.wait(100)
-                    
-                    pygame.mixer.music.unload()
-                    time.sleep(0.1)
-                    print("✅ Audio reproducido exitosamente")
-                    
-                except Exception as e:
-                    self.logger.warning(f"⚠️ Error reproduciendo audio: {e}")
-                    print(f"⚠️ Error reproducción: {e}")
+            if result.get('success'):
+                # Reproducir si se solicita
+                if play_audio and PYGAME_AVAILABLE:
+                    self._play_audio(result['filepath'])
+                
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"🔊 **Audio generado exitosamente**\n\n"
+                               f"📝 **Texto:** {text[:100]}{'...' if len(text) > 100 else ''}\n"
+                               f"🎭 **Voz:** {voice}\n"
+                               f"🤖 **Modelo:** {model}\n"
+                               f"📁 **Guardado en:** {result['filepath']}\n"
+                               f"📊 **Tamaño:** {result.get('size_bytes', 0):,} bytes\n"
+                               f"⏱️ **Generado en:** {result.get('generation_time', 'N/A')} segundos\n\n"
+                               f"{'🔊 Audio reproducido' if play_audio and PYGAME_AVAILABLE else '💾 Audio guardado'}"
+                    }],
+                    "audio_data": {
+                        "filepath": result['filepath'],
+                        "text": text,
+                        "voice": voice,
+                        "model": model,
+                        "size_bytes": result.get('size_bytes'),
+                        "generation_time": result.get('generation_time')
+                    }
+                }
+            else:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"❌ **Error generando audio**\n\n"
+                               f"**Error:** {result.get('error', 'Error desconocido')}\n"
+                               f"**Texto:** {text[:100]}...\n\n"
+                               f"🔧 **Posibles soluciones:**\n"
+                               f"• Verificar OPENAI_API_KEY\n"
+                               f"• Reducir longitud del texto\n"
+                               f"• Intentar con otra voz\n"
+                               f"• Verificar créditos en OpenAI"
+                    }]
+                }
+                
+        except Exception as e:
+            logger.error(f"Error en openai tts adapter: {e}")
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": f"❌ **Error del sistema de TTS:** {str(e)}"
+                }]
+            }
+    
+    def _generate_speech(self, text: str, voice: str, model: str) -> dict:
+        """Generar audio usando OpenAI TTS"""
+        start_time = datetime.now()
+        
+        try:
+            # Generar audio con OpenAI
+            response = self.client.audio.speech.create(
+                model=model,
+                voice=voice,
+                input=text,
+                response_format="mp3"
+            )
             
-            # Convertir a base64 si se solicita
-            if return_audio:
-                try:
-                    with open(speech_file_path, 'rb') as f:
-                        audio_bytes = f.read()
-                        audio_base64 = base64.b64encode(audio_bytes).decode()
-                except Exception as e:
-                    self.logger.warning(f"Error leyendo archivo para base64: {e}")
+            # Guardar archivo
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"tts_generated_{timestamp}.mp3"
+            filepath = os.path.join(self.output_dir, filename)
             
-            # Limpiar archivo temporal
-            self._cleanup_file(speech_file_path)
+            # Escribir archivo de audio
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_bytes():
+                    f.write(chunk)
+            
+            generation_time = (datetime.now() - start_time).total_seconds()
+            size_bytes = os.path.getsize(filepath)
+            
+            logger.info(f"✅ Audio TTS generado: {filepath}")
             
             return {
-                "success": True,
-                "action": "text_to_speech",
-                "text": text,
-                "voice": voice,
-                "model": model,
-                "speed": speed,
-                "preset_accent": preset_accent,
-                "instructions": final_instructions,
-                "format": response_format,
-                "audio_base64": audio_base64,
-                "message": f"🎙️ OpenAI TTS ({voice}, {preset_accent}): '{text[:30]}...'" if len(text) > 30 else f"🎙️ OpenAI TTS ({voice}, {preset_accent}): '{text}'"
+                'success': True,
+                'filepath': filepath,
+                'filename': filename,
+                'size_bytes': size_bytes,
+                'generation_time': round(generation_time, 2)
             }
             
         except Exception as e:
-            self.logger.error(f"Error general en TTS: {e}")
+            logger.error(f"Error generando TTS: {e}")
             return {
-                "success": False,
-                "error": str(e),
-                "message": f"❌ Error OpenAI TTS: {str(e)}"
+                'success': False,
+                'error': f'Error de generación TTS: {str(e)}'
             }
     
-    def _get_openai_voices(self):
-        """Obtener voces disponibles de OpenAI (11 voces actualizadas)"""
-        voices_info = [
-            {
-                "id": "alloy",
-                "name": "Alloy",
-                "description": "Neutral, balanced voice",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "ash",
-                "name": "Ash",
-                "description": "Clear, articulate voice",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "ballad",
-                "name": "Ballad",
-                "description": "Melodic, storytelling voice",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "coral",
-                "name": "Coral",
-                "description": "Warm, friendly voice with excellent instruction support",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "echo",
-                "name": "Echo",
-                "description": "Male voice with character",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "fable",
-                "name": "Fable", 
-                "description": "Storytelling voice",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "nova",
-                "name": "Nova",
-                "description": "Young, energetic voice",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "onyx",
-                "name": "Onyx",
-                "description": "Deep, authoritative voice",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "sage",
-                "name": "Sage",
-                "description": "Wise, mature voice",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            },
-            {
-                "id": "shimmer",
-                "name": "Shimmer",
-                "description": "Bright, cheerful voice",
-                "type": "TTS",
-                "provider": "OpenAI",
-                "supports_instructions": True
-            }
-        ]
-        
-        return {
-            "success": True,
-            "action": "get_voices",
-            "voices": voices_info,
-            "total_voices": len(voices_info),
-            "message": f"🎭 OpenAI TTS: {len(voices_info)} voces disponibles (todas con soporte instructions y streaming)"
-        }
-    
-    def _cleanup_file(self, file_path):
-        """Limpiar archivo temporal con reintentos"""
-        if not file_path or not Path(file_path).exists():
-            return
+    def _play_audio(self, filepath: str):
+        """Reproducir audio usando pygame"""
+        try:
+            if not PYGAME_AVAILABLE:
+                logger.warning("pygame no disponible para reproducción")
+                return
             
-        for attempt in range(3):
-            try:
-                time.sleep(0.1)
-                os.unlink(file_path)
-                break
-            except PermissionError:
-                if attempt == 2:
-                    self.logger.warning(f"No se pudo eliminar archivo: {file_path}")
-                else:
-                    time.sleep(0.5)
-            except Exception as e:
-                self.logger.warning(f"Error eliminando archivo: {e}")
-                break
+            pygame.mixer.music.load(filepath)
+            pygame.mixer.music.play()
+            
+            # Esperar a que termine la reproducción
+            while pygame.mixer.music.get_busy():
+                pygame.time.wait(100)
+                
+            logger.info("✅ Audio reproducido correctamente")
+            
+        except Exception as e:
+            logger.error(f"Error reproduciendo audio: {e}")
+    
+    def get_available_voices(self) -> list:
+        """Obtener lista de voces disponibles"""
+        return ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
+    
+    def get_available_models(self) -> list:
+        """Obtener lista de modelos disponibles"""
+        return ['tts-1', 'tts-1-hd']
+    
+    def process(self, arguments: dict) -> str:
+        """Alias para execute - compatibilidad"""
+        result = self.execute(arguments)
+        if isinstance(result, dict) and "content" in result:
+            return result["content"][0]["text"]
+        return str(result)
 
-
-def test_openai_tts_adapter():
-    """Probar el adaptador OpenAI TTS con streaming e instructions"""
-    print("🧪 PRUEBA OPENAI TTS ADAPTER - STREAMING E INSTRUCTIONS")
-    print("=" * 70)
+# Función de prueba
+def test_openai_tts():
+    """Función para probar OpenAI TTS adapter"""
+    print("🧪 Testing OpenAI TTS Adapter...")
     
-    # Verificar clave API
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_KEY")
-    if not api_key:
-        print("❌ ERROR: No se encontró la clave de OpenAI")
-        print("💡 Asegúrate de tener OPENAI_API_KEY en tu .env")
-        return
+    adapter = OpenAITTSAdapter()
+    print(f"Cliente disponible: {adapter.has_client}")
+    print(f"Voces disponibles: {adapter.get_available_voices()}")
+    print(f"Modelos disponibles: {adapter.get_available_models()}")
     
-    print(f"✅ Clave API encontrada: {api_key[:20]}...")
+    # Test básico
+    result = adapter.execute({
+        "text": "Hola, soy Ava Bot. Este es un test de síntesis de voz.",
+        "voice": "nova",
+        "model": "tts-1",
+        "play": False
+    })
     
-    # Verificar versión de OpenAI
-    try:
-        import openai
-        print(f"📦 Versión OpenAI: {openai.__version__}")
-    except:
-        print("⚠️ No se pudo verificar la versión de OpenAI")
-    
-    # Inicializar adaptador
-    try:
-        adapter = OpenAITTSAdapter()
-        print("✅ Adaptador inicializado correctamente")
-    except Exception as e:
-        print(f"❌ Error inicializando: {e}")
-        return
-    
-    print("\n" + "─" * 70)
-    
-    # TEST 1: Audio con acento colombiano
-    print("📋 TEST 1: AUDIO CON ACENTO COLOMBIANO (STREAMING)")
-    
-    test_colombiano = {
-        "action": "text_to_speech",
-        "text": "¡Hola parcero! Soy AVA Assistant y te saludo con mucho cariño desde Colombia",
-        "voice": "coral",
-        "model": "gpt-4o-mini-tts",
-        "preset_accent": "colombiano",
-        "play_audio": True,
-        "return_audio": False
-    }
-    
-    try:
-        print("🎙️ Generando audio con acento colombiano (streaming)...")
-        result = adapter.process(test_colombiano)
-        if result.get("success"):
-            print("✅ Audio generado con streaming y reproducido")
-            print(f"📝 Texto: {result.get('text')}")
-            print(f"🗣️ Voz: {result.get('voice')}")
-            print(f"🤖 Modelo: {result.get('model')}")
-            print(f"🌍 Acento: {result.get('preset_accent')}")
-            print(f"📋 Instructions: {result.get('instructions')}")
-            print(f"🌊 Streaming: {result.get('streaming', False)}")
-        else:
-            print(f"❌ Error: {result.get('error')}")
-            if "solution" in result:
-                print(f"💡 Solución: {result.get('solution')}")
-    except Exception as e:
-        print(f"❌ Excepción: {e}")
-    
-    print("\n" + "─" * 70)
-    
-    # TEST 2: Instructions personalizadas
-    print("📋 TEST 2: INSTRUCTIONS PERSONALIZADAS (STREAMING)")
-    
-    test_custom = {
-        "action": "text_to_speech",
-        "text": "Esta es una prueba increíble del nuevo sistema de voz con streaming",
-        "voice": "coral",
-        "model": "gpt-4o-mini-tts",
-        "preset_accent": "custom",
-        "instructions": "Speak in a cheerful and positive tone, like you're excited to share good news with a friend.",
-        "play_audio": True,
-        "return_audio": False
-    }
-    
-    try:
-        print("🎙️ Generando audio con instructions personalizadas...")
-        result = adapter.process(test_custom)
-        if result.get("success"):
-            print("✅ Audio con instructions personalizadas generado")
-            print(f"📋 Instructions: {result.get('instructions')}")
-            print(f"🌊 Streaming: {result.get('streaming', False)}")
-        else:
-            print(f"❌ Error: {result.get('error')}")
-    except Exception as e:
-        print(f"❌ Excepción: {e}")
-    
-    print("\n" + "=" * 70)
-    print("🎉 PRUEBA COMPLETADA")
-    print("\n🔧 CONFIGURACIÓN REQUERIDA:")
-    print("   📦 pip install --upgrade openai")
-    print("   🤖 Modelo: gpt-4o-mini-tts únicamente")
-    print("   🌊 Streaming: with_streaming_response.create()")
-    print("   📋 Instructions: Soporte completo para acentos")
-
+    print(f"Resultado: {result}")
 
 if __name__ == "__main__":
-    test_openai_tts_adapter()
+    test_openai_tts()
